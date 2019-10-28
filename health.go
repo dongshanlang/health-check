@@ -2,35 +2,37 @@
 // the following line will install handlers under the /status
 // usage:
 //
-//    import _ "net/http/pprof"
+//    import _ "git.qietv.work/go-public/health"
 //
 
 //Another case, when there is not existing a http server, the usage should be like this
 //
-//    import _ "net/http/pprof"
+//    import _ "git.qietv.work/go-public/health"
 //    health.Start(":8080")
 //
+//author lixiumin
 package health
 
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"runtime"
 	"time"
 )
-
-var h = new(Health)
-
-func init() {
-	http.HandleFunc("/status", NewJSONHandlerFunc(*h, nil))
-}
 
 type Health struct {
 	//TODO: get a logger from outside.
 	//Logger     log.Logger
 	addr string
 }
+
+var (
+	Version string
+	Build   string
+	Debug   bool
+)
 
 // State is a struct that contains the results of the latest
 // run of a particular check.
@@ -65,11 +67,10 @@ type AppInformation struct {
 	HostName string `json:"host_name"`
 }
 
-// State will return a map of all current healthcheck states,
-// The returned structs can be used for figuring out additional analytics or
-// used for building your own status handler (todo)
-func (h *Health) State() (State, error) {
-	return h.safeGetStates(), nil
+var h = new(Health)
+
+func init() {
+	http.HandleFunc("/status", NewJSONHandlerFunc(*h, nil))
 }
 
 func (h *Health) Start(addr string) error {
@@ -81,42 +82,6 @@ func (h *Health) Start(addr string) error {
 
 	go http.ListenAndServe(h.addr, nil)
 	return nil
-}
-
-//Start will start a http server listen at addr, the addr should be like "192.168.3.12:8090" or ":8090".
-func Start(addr string) error {
-	return h.Start(addr)
-}
-
-// get all states
-func (h *Health) safeGetStates() State {
-	m := &runtime.MemStats{}
-	runtime.ReadMemStats(m)
-	return State{
-		ServerTime: time.Now(),
-		//AppInfo:    nil,
-		MemStatus: MemoryStatus{
-			TotalAlloc:   m.TotalAlloc,
-			Alloc:        m.Alloc,
-			Mallocs:      m.Mallocs,
-			HeapAlloc:    m.HeapAlloc,
-			LastGc:       m.LastGC,
-			NextGc:       m.NextGC,
-			PauseTotalNs: m.PauseTotalNs,
-			NumGC:        m.NumGC,
-		},
-		Err: "",
-	}
-}
-
-func (h *Health) setAddr(addr string) error {
-	h.addr = addr
-	return nil
-}
-
-type jsonStatus struct {
-	Message string `json:"message"`
-	Status  string `json:"status"`
 }
 
 // NewJSONHandlerFunc will return an `http.HandlerFunc` that will marshal and
@@ -141,6 +106,11 @@ func NewJSONHandlerFunc(h Health, custom map[string]interface{}) http.HandlerFun
 	})
 }
 
+type jsonStatus struct {
+	Message string `json:"message"`
+	Status  string `json:"status"`
+}
+
 func writeJSONStatus(rw http.ResponseWriter, status, message string, statusCode int) {
 	jsonData, _ := json.Marshal(&jsonStatus{
 		Message: message,
@@ -155,4 +125,51 @@ func writeJSONResponse(rw http.ResponseWriter, statusCode int, content []byte) {
 	rw.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
 	rw.WriteHeader(statusCode)
 	rw.Write(content)
+}
+
+// State will return a map of all current healthcheck states,
+// The returned structs can be used for figuring out additional analytics or
+// used for building your own status handler (todo)
+func (h *Health) State() (State, error) {
+	return h.getState(), nil
+}
+
+// get all states
+func (h *Health) getState() State {
+	m := &runtime.MemStats{}
+	runtime.ReadMemStats(m)
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = ""
+	}
+	return State{
+		ServerTime: time.Now(),
+		AppInfo: AppInformation{
+			Version:  Version,
+			Debug:    Debug,
+			Build:    Build,
+			HostName: hostname,
+		},
+		MemStatus: MemoryStatus{
+			TotalAlloc:   m.TotalAlloc,
+			Alloc:        m.Alloc,
+			Mallocs:      m.Mallocs,
+			HeapAlloc:    m.HeapAlloc,
+			LastGc:       m.LastGC,
+			NextGc:       m.NextGC,
+			PauseTotalNs: m.PauseTotalNs,
+			NumGC:        m.NumGC,
+		},
+		Err: "",
+	}
+}
+
+func (h *Health) setAddr(addr string) error {
+	h.addr = addr
+	return nil
+}
+
+//Start will start a http server listen at addr, the addr should be like "192.168.3.12:8090" or ":8090".
+func Start(addr string) error {
+	return h.Start(addr)
 }
